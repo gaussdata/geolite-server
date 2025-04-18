@@ -1,51 +1,89 @@
-import express from 'express';
-import rateLimit from 'express-rate-limit'
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import express from "express";
 import geoip from 'geoip-lite';
+import { z } from "zod";
 
+const server = new McpServer({
+  name: "example-server",
+  version: "1.0.0"
+});
+
+// 这里编写提供的 MCP Tool 的代码
+server.tool(
+  "ip2geo",
+  { ip: z.string() },
+  async ({ ip }) => {
+    const data = geoip.lookup(ip);
+    return {
+      content: [{ type: "text", text: data.timezone || "Unknown country" }],
+    };
+  }
+);
+
+// 下方为通用代码
 const app = express();
+app.use(express.json());
 
-// 限制 IP 访问频率
-const limiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 一分钟内
-  max: 300, // 最多访问 300 次
-  message: '访问过于频繁，请稍后再试。',
+const transport = new StreamableHTTPServerTransport({
+  sessionIdGenerator: undefined, // set to undefined for stateless servers
 });
 
-// 应用限制 IP 访问频率中间件
-app.use(limiter);
+// Setup routes for the server
+const setupServer = async () => {
+  await server.connect(transport);
+};
 
-// JSON 解析
-app.use(express.json())
-
-// cors 跨域
-app.all("*", function (req, res, next) {
-  //设置允许跨域的域名，*代表允许任意域名跨域
-  res.header("Access-Control-Allow-Origin", "*");
-  //允许的header类型
-  res.header("Access-Control-Allow-Headers", "content-type");
-  //跨域允许的请求方式
-  res.header("Access-Control-Allow-Methods", "DELETE,PUT,POST,GET,OPTIONS");
-  // next
-  next();
+app.post('/mcp', async (req, res) => {
+  console.log('Received MCP request:', req.body);
+  try {
+      await transport.handleRequest(req, res, req.body);
+  } catch (error) {
+    console.error('Error handling MCP request:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'Internal server error',
+        },
+        id: null,
+      });
+    }
+  }
 });
 
-// 当客户端以get方式访问/路由时
-app.get("/", (req, res) => {
-  res.send("Hello Express");
+app.get('/mcp', async (req, res) => {
+  console.log('Received GET MCP request');
+  res.writeHead(405).end(JSON.stringify({
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message: "Method not allowed."
+    },
+    id: null
+  }));
 });
 
-// 查询
-app.post("/ip2geo", (req, res) => {
-  const { ip } = req.body
-  const data =  geoip.lookup(ip)
-  res.send({
-    code: 200,
-    message: 'success',
-    data: data
+app.delete('/mcp', async (req, res) => {
+  console.log('Received DELETE MCP request');
+  res.writeHead(405).end(JSON.stringify({
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message: "Method not allowed."
+    },
+    id: null
+  }));
+});
+
+// Start the server
+const PORT = 3000;
+setupServer().then(() => {
+  app.listen(PORT, () => {
+    console.log(`MCP Streamable HTTP Server listening on port ${PORT}`);
   });
-});
-
-// 程序监听3000端口
-app.listen(3000, () => {
-  console.log('服务器已启动，端口号为 3000');
+}).catch(error => {
+  console.error('Failed to set up the server:', error);
+  process.exit(1);
 });
