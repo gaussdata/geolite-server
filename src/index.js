@@ -1,43 +1,13 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
-import geoip from 'geoip-lite';
-import { z } from "zod";
-
-const server = new McpServer({
-  name: "example-server",
-  version: "1.0.0"
-});
-
-// 这里编写提供的 MCP Tool 的代码
-server.tool(
-  "ip2geo",
-  { ip: z.string() },
-  async ({ ip }) => {
-    const data = geoip.lookup(ip);
-    return {
-      content: [{ type: "text", text: data.timezone || "Unknown country" }],
-    };
-  }
-);
-
+import { setupServer, transport } from "./mcp.js";
 // 下方为通用代码
 const app = express();
 app.use(express.json());
 
-const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: undefined, // set to undefined for stateless servers
-});
-
-// Setup routes for the server
-const setupServer = async () => {
-  await server.connect(transport);
-};
-
 app.post('/mcp', async (req, res) => {
   console.log('Received MCP request:', req.body);
   try {
-      await transport.handleRequest(req, res, req.body);
+    await transport.handleRequest(req, res, req.body);
   } catch (error) {
     console.error('Error handling MCP request:', error);
     if (!res.headersSent) {
@@ -81,7 +51,7 @@ app.delete('/mcp', async (req, res) => {
 const PORT = 3000;
 setupServer().then(() => {
   app.listen(PORT, () => {
-    console.log(`MCP Streamable HTTP Server listening on port ${PORT}`);
+    console.log(`MCP Streamable HTTP Server listening on port ${PORT} http://localhost:${PORT}`);
   });
 }).catch(error => {
   console.error('Failed to set up the server:', error);
